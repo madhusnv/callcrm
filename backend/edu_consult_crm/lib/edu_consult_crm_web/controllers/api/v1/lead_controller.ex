@@ -3,17 +3,27 @@ defmodule EduConsultCrmWeb.Api.V1.LeadController do
 
   alias EduConsultCrm.Crm
   alias EduConsultCrm.Accounts.Guardian
+  alias EduConsultCrm.Tenants
 
   action_fallback EduConsultCrmWeb.FallbackController
 
   # POST /lead/getData
   def index(conn, params) do
     org = conn.assigns[:current_org]
-
-    {leads, total} = Crm.list_leads_with_count(org.id, normalize_params(params))
+    filter_params = normalize_params(params)
     page = Map.get(params, "page", 1)
 
-    render(conn, :index, leads: leads, total: total, page: page)
+    case Tenants.with_org(org.id, fn ->
+           Crm.list_leads_with_count(org.id, filter_params)
+         end) do
+      {:ok, {leads, total}} ->
+        render(conn, :index, leads: leads, total: total, page: page)
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to fetch leads")
+    end
   end
 
   # POST /lead/save
@@ -22,41 +32,55 @@ defmodule EduConsultCrmWeb.Api.V1.LeadController do
     user = Guardian.Plug.current_resource(conn)
 
     result =
-      case lead_params["id"] do
-        nil ->
-          attrs = normalize_lead_params(lead_params, org.id, user.id)
-          Crm.create_lead(attrs, user)
+      Tenants.with_org(org.id, fn ->
+        case lead_params["id"] do
+          nil ->
+            attrs = normalize_lead_params(lead_params, org.id, user.id)
 
-        id ->
-          case Crm.get_lead_for_org(org.id, id) do
-            nil ->
-              {:error, :not_found}
+            case Crm.create_lead(attrs, user) do
+              {:ok, lead} -> {:ok, Crm.preload_lead(lead)}
+              other -> other
+            end
 
-            lead ->
-              attrs = normalize_lead_params(lead_params, org.id, nil)
-              Crm.update_lead(lead, attrs, user)
-          end
-      end
+          id ->
+            case Crm.get_lead_for_org(org.id, id) do
+              nil ->
+                {:error, :not_found}
+
+              lead ->
+                attrs = normalize_lead_params(lead_params, org.id, nil)
+
+                case Crm.update_lead(lead, attrs, user) do
+                  {:ok, updated} -> {:ok, Crm.preload_lead(updated)}
+                  other -> other
+                end
+            end
+        end
+      end)
 
     case result do
-      {:ok, lead} ->
-        lead = Crm.preload_lead(lead)
+      {:ok, {:ok, lead}} ->
         render(conn, :show, lead: lead)
 
-      {:error, :not_found} ->
+      {:ok, {:error, :not_found}} ->
         conn
         |> put_status(:not_found)
         |> render(:error, message: "Lead not found")
 
-      {:error, :leads_limit_reached} ->
+      {:ok, {:error, :leads_limit_reached}} ->
         conn
         |> put_status(:payment_required)
         |> render(:error, message: "Lead limit reached. Please upgrade your plan.")
 
-      {:error, changeset} ->
+      {:ok, {:error, changeset}} ->
         conn
         |> put_status(:unprocessable_entity)
         |> render(:error, changeset: changeset)
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to save lead")
     end
   end
 
@@ -65,54 +89,132 @@ defmodule EduConsultCrmWeb.Api.V1.LeadController do
     org = conn.assigns[:current_org]
     user = Guardian.Plug.current_resource(conn)
 
-    with {:ok, lead} <- get_lead_for_org(org.id, lead_id),
-         {:ok, note} <- Crm.create_note(lead, user, params) do
-      render(conn, :note, note: note)
+    result =
+      Tenants.with_org(org.id, fn ->
+        with {:ok, lead} <- get_lead_for_org(org.id, lead_id),
+             {:ok, note} <- Crm.create_note(lead, user, params) do
+          {:ok, note}
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, note}} ->
+        render(conn, :note, note: note)
+
+      {:ok, {:error, _} = error} ->
+        error
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to save note")
     end
   end
 
   # POST /lead/status
   def list_statuses(conn, _params) do
     org = conn.assigns[:current_org]
-    statuses = Crm.list_statuses(org.id)
 
-    render(conn, :statuses, statuses: statuses)
+    case Tenants.with_org(org.id, fn -> Crm.list_statuses(org.id) end) do
+      {:ok, statuses} ->
+        render(conn, :statuses, statuses: statuses)
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to fetch statuses")
+    end
   end
 
   # POST /lead/getByNumber
   def get_by_number(conn, %{"phone" => phone}) do
     org = conn.assigns[:current_org]
 
-    case Crm.get_lead_by_phone(org.id, phone) do
-      nil ->
+    case Tenants.with_org(org.id, fn ->
+           case Crm.get_lead_by_phone(org.id, phone) do
+             nil -> nil
+             lead -> Crm.preload_lead(lead)
+           end
+         end) do
+      {:ok, nil} ->
         conn
         |> put_status(:ok)
         |> render(:show, lead: nil)
 
-      lead ->
-        lead = Crm.preload_lead(lead)
+      {:ok, lead} ->
         render(conn, :show, lead: lead)
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to fetch lead")
+    end
+  end
+
+  # POST /lead/getById
+  def get_by_id(conn, %{"leadId" => lead_id}) do
+    org = conn.assigns[:current_org]
+
+    case Tenants.with_org(org.id, fn ->
+           case Crm.get_lead_for_org(org.id, lead_id) do
+             nil -> nil
+             lead -> Crm.preload_lead(lead)
+           end
+         end) do
+      {:ok, nil} ->
+        conn
+        |> put_status(:ok)
+        |> render(:show, lead: nil)
+
+      {:ok, lead} ->
+        render(conn, :show, lead: lead)
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to fetch lead")
     end
   end
 
   # POST /lead/note
   def get_notes(conn, %{"leadId" => lead_id} = params) do
     org = conn.assigns[:current_org]
+    page = Map.get(params, "page", 1)
 
-    with {:ok, _lead} <- get_lead_for_org(org.id, lead_id) do
-      {notes, total} = Crm.list_notes_with_count(lead_id, normalize_params(params))
-      page = Map.get(params, "page", 1)
+    result =
+      Tenants.with_org(org.id, fn ->
+        with {:ok, _lead} <- get_lead_for_org(org.id, lead_id) do
+          Crm.list_notes_with_count(lead_id, normalize_params(params))
+        end
+      end)
 
-      render(conn, :notes, notes: notes, total: total, page: page)
+    case result do
+      {:ok, {:error, _} = error} ->
+        error
+
+      {:ok, {notes, total}} ->
+        render(conn, :notes, notes: notes, total: total, page: page)
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to fetch notes")
     end
   end
 
   # POST /lead/allTags
   def all_tags(conn, _params) do
     org = conn.assigns[:current_org]
-    tags = Crm.list_tags(org.id)
 
-    render(conn, :tags, tags: tags)
+    case Tenants.with_org(org.id, fn -> Crm.list_tags(org.id) end) do
+      {:ok, tags} ->
+        render(conn, :tags, tags: tags)
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to fetch tags")
+    end
   end
 
   # POST /lead/notContacted
@@ -126,24 +228,40 @@ defmodule EduConsultCrmWeb.Api.V1.LeadController do
       |> Map.put(:not_contacted, true)
       |> maybe_filter_by_user(user, params)
 
-    {leads, total} = Crm.list_leads_with_count(org.id, filter_params)
     page = Map.get(params, "page", 1)
 
-    render(conn, :index, leads: leads, total: total, page: page)
+    case Tenants.with_org(org.id, fn ->
+           Crm.list_leads_with_count(org.id, filter_params)
+         end) do
+      {:ok, {leads, total}} ->
+        render(conn, :index, leads: leads, total: total, page: page)
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to fetch leads")
+    end
   end
 
   # POST /lead/isDeleted
   def check_deleted(conn, %{"leadId" => id}) do
     org = conn.assigns[:current_org]
 
-    case Crm.get_lead_for_org(org.id, id, include_deleted: true) do
-      nil ->
+    case Tenants.with_org(org.id, fn ->
+           Crm.get_lead_for_org(org.id, id, include_deleted: true)
+         end) do
+      {:ok, nil} ->
         conn
         |> put_status(:not_found)
         |> render(:error, message: "Lead not found")
 
-      lead ->
+      {:ok, lead} ->
         render(conn, :deleted_status, lead: lead)
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to fetch lead")
     end
   end
 
@@ -152,10 +270,25 @@ defmodule EduConsultCrmWeb.Api.V1.LeadController do
     org = conn.assigns[:current_org]
     user = Guardian.Plug.current_resource(conn)
 
-    with {:ok, lead} <- get_lead_for_org(org.id, id, include_deleted: true),
-         {:ok, restored_lead} <- Crm.restore_lead(lead, user) do
-      restored_lead = Crm.preload_lead(restored_lead)
-      render(conn, :show, lead: restored_lead)
+    result =
+      Tenants.with_org(org.id, fn ->
+        with {:ok, lead} <- get_lead_for_org(org.id, id, include_deleted: true),
+             {:ok, restored_lead} <- Crm.restore_lead(lead, user) do
+          {:ok, Crm.preload_lead(restored_lead)}
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, restored_lead}} ->
+        render(conn, :show, lead: restored_lead)
+
+      {:ok, {:error, _} = error} ->
+        error
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to restore lead")
     end
   end
 
@@ -164,9 +297,15 @@ defmodule EduConsultCrmWeb.Api.V1.LeadController do
     org = conn.assigns[:current_org]
     user = Guardian.Plug.current_resource(conn)
 
-    count = Crm.count_due_callbacks(org.id, user.id)
+    case Tenants.with_org(org.id, fn -> Crm.count_due_callbacks(org.id, user.id) end) do
+      {:ok, count} ->
+        render(conn, :due_count, count: count)
 
-    render(conn, :due_count, count: count)
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> render(:error, message: "Failed to fetch callbacks")
+    end
   end
 
   # Private helpers

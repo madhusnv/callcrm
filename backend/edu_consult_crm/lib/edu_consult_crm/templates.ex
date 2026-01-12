@@ -19,7 +19,7 @@ defmodule EduConsultCrm.Templates do
     |> where([t], t.organization_id == ^org_id)
     |> filter_active(params)
     |> filter_by_category(params, :category)
-    |> order_by([t], [asc: t.order, asc: t.name])
+    |> order_by([t], asc: t.order, asc: t.name)
     |> Repo.all()
   end
 
@@ -78,7 +78,7 @@ defmodule EduConsultCrm.Templates do
     |> filter_active(params)
     |> filter_by_category(params, :category)
     |> filter_by_channel(params)
-    |> order_by([t], [asc: t.order, asc: t.name])
+    |> order_by([t], asc: t.order, asc: t.name)
     |> Repo.all()
   end
 
@@ -148,13 +148,16 @@ defmodule EduConsultCrm.Templates do
   defp filter_by_category(query, %{category: category}, _) when not is_nil(category) do
     where(query, [t], t.category == ^category)
   end
+
   defp filter_by_category(query, _, _), do: query
 
   defp filter_by_channel(query, %{channel: "whatsapp"}) do
     where(query, [t], t.whatsapp_enabled == true)
   end
+
   defp filter_by_channel(query, %{channel: "sms"}) do
     where(query, [t], t.sms_enabled == true)
   end
+
   defp filter_by_channel(query, _), do: query
 end

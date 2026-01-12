@@ -3,6 +3,9 @@ package com.educonsult.crm.di
 import com.educonsult.crm.BuildConfig
 import com.educonsult.crm.data.remote.api.AuthApi
 import com.educonsult.crm.data.remote.api.CallApi
+import com.educonsult.crm.data.remote.api.DashboardApi
+import com.educonsult.crm.data.remote.api.EducationApi
+import com.educonsult.crm.data.remote.api.EmployeeApi
 import com.educonsult.crm.data.remote.api.LeadApi
 import com.educonsult.crm.data.remote.interceptor.AuthInterceptor
 import com.educonsult.crm.util.Constants
@@ -89,6 +92,24 @@ object NetworkModule {
     @Singleton
     fun provideCallApi(retrofit: Retrofit): CallApi {
         return retrofit.create(CallApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideEducationApi(retrofit: Retrofit): EducationApi {
+        return retrofit.create(EducationApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideDashboardApi(retrofit: Retrofit): DashboardApi {
+        return retrofit.create(DashboardApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideEmployeeApi(retrofit: Retrofit): EmployeeApi {
+        return retrofit.create(EmployeeApi::class.java)
     }
 
     @Provides

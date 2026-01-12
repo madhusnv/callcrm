@@ -2,6 +2,7 @@ defmodule EduConsultCrmWeb.Api.V1.TemplateController do
   use EduConsultCrmWeb, :controller
 
   alias EduConsultCrm.Templates
+  alias EduConsultCrm.Tenants
 
   action_fallback EduConsultCrmWeb.FallbackController
 
@@ -11,19 +12,25 @@ defmodule EduConsultCrmWeb.Api.V1.TemplateController do
   """
   def list_note_templates(conn, params) do
     org = conn.assigns.current_org
-    
+
     filter_params = %{
       category: params["category"]
     }
 
-    templates = Templates.list_note_templates(org.id, filter_params)
+    case Tenants.with_org(org.id, fn -> Templates.list_note_templates(org.id, filter_params) end) do
+      {:ok, templates} ->
+        conn
+        |> put_status(:ok)
+        |> json(%{
+          status: true,
+          data: Enum.map(templates, &note_template_data/1)
+        })
 
-    conn
-    |> put_status(:ok)
-    |> json(%{
-      status: true,
-      data: Enum.map(templates, &note_template_data/1)
-    })
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{status: false, message: "Failed to fetch templates"})
+    end
   end
 
   @doc """
@@ -32,20 +39,29 @@ defmodule EduConsultCrmWeb.Api.V1.TemplateController do
   """
   def list_message_templates(conn, params) do
     org = conn.assigns.current_org
-    
+
     filter_params = %{
       category: params["category"],
-      channel: params["channel"]  # "whatsapp" or "sms"
+      # "whatsapp" or "sms"
+      channel: params["channel"]
     }
 
-    templates = Templates.list_message_templates(org.id, filter_params)
+    case Tenants.with_org(org.id, fn ->
+           Templates.list_message_templates(org.id, filter_params)
+         end) do
+      {:ok, templates} ->
+        conn
+        |> put_status(:ok)
+        |> json(%{
+          status: true,
+          data: Enum.map(templates, &message_template_data/1)
+        })
 
-    conn
-    |> put_status(:ok)
-    |> json(%{
-      status: true,
-      data: Enum.map(templates, &message_template_data/1)
-    })
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{status: false, message: "Failed to fetch templates"})
+    end
   end
 
   @doc """
@@ -61,13 +77,13 @@ defmodule EduConsultCrmWeb.Api.V1.TemplateController do
   def render_template(conn, %{"template_id" => template_id, "values" => values}) do
     org = conn.assigns.current_org
 
-    case Templates.get_message_template(org.id, template_id) do
-      nil ->
+    case Tenants.with_org(org.id, fn -> Templates.get_message_template(org.id, template_id) end) do
+      {:ok, nil} ->
         conn
         |> put_status(:not_found)
         |> json(%{status: false, message: "Template not found"})
 
-      template ->
+      {:ok, template} ->
         rendered = Templates.render_message_template(template, values)
 
         conn
@@ -79,6 +95,11 @@ defmodule EduConsultCrmWeb.Api.V1.TemplateController do
             template_name: template.name
           }
         })
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{status: false, message: "Failed to render template"})
     end
   end
 

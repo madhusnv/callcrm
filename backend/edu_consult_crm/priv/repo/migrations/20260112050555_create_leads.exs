@@ -4,10 +4,16 @@ defmodule EduConsultCrm.Repo.Migrations.CreateLeads do
   def change do
     create table(:leads, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :organization_id, references(:organizations, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :organization_id, references(:organizations, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :branch_id, references(:branches, type: :binary_id, on_delete: :nilify_all)
       add :assigned_to, references(:users, type: :binary_id, on_delete: :nilify_all)
-      add :status_id, references(:lead_statuses, type: :binary_id, on_delete: :restrict), null: false
+
+      add :status_id, references(:lead_statuses, type: :binary_id, on_delete: :restrict),
+        null: false
+
       add :created_by, references(:users, type: :binary_id, on_delete: :nilify_all)
 
       # Personal Info

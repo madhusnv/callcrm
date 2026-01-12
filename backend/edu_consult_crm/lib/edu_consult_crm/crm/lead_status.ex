@@ -21,7 +21,16 @@ defmodule EduConsultCrm.Crm.LeadStatus do
 
   def changeset(status, attrs) do
     status
-    |> cast(attrs, [:name, :code, :color, :order, :is_default, :is_closed, :is_active, :organization_id])
+    |> cast(attrs, [
+      :name,
+      :code,
+      :color,
+      :order,
+      :is_default,
+      :is_closed,
+      :is_active,
+      :organization_id
+    ])
     |> validate_required([:name, :code, :organization_id])
     |> unique_constraint([:organization_id, :code])
     |> foreign_key_constraint(:organization_id)

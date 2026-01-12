@@ -27,6 +27,9 @@ interface LeadDao {
     @Query("SELECT * FROM leads WHERE syncStatus != 0")
     suspend fun getPendingSync(): List<LeadEntity>
 
+    @Query("SELECT * FROM leads WHERE syncStatus = :status AND deletedAt IS NULL ORDER BY updatedAt DESC")
+    fun getBySyncStatus(status: Int): Flow<List<LeadEntity>>
+
     @Query("SELECT * FROM leads WHERE nextFollowUpDate <= :date AND deletedAt IS NULL ORDER BY nextFollowUpDate ASC")
     fun getFollowUpsDue(date: Long): Flow<List<LeadEntity>>
 

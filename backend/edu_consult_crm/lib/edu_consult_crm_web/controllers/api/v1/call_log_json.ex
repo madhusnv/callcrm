@@ -50,6 +50,7 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogJSON do
 
   defp lead_summary(nil), do: nil
   defp lead_summary(%Ecto.Association.NotLoaded{}), do: nil
+
   defp lead_summary(lead) do
     %{
       id: lead.id,
@@ -61,6 +62,7 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogJSON do
 
   defp user_summary(nil), do: nil
   defp user_summary(%Ecto.Association.NotLoaded{}), do: nil
+
   defp user_summary(user) do
     %{
       id: user.id,
@@ -71,6 +73,7 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogJSON do
 
   defp recording_data(nil), do: nil
   defp recording_data(%Ecto.Association.NotLoaded{}), do: nil
+
   defp recording_data(%CallRecording{} = recording) do
     %{
       id: recording.id,

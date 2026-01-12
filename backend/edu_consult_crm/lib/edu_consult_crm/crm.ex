@@ -316,6 +316,7 @@ defmodule EduConsultCrm.Crm do
     Repo.transaction(fn ->
       note_attrs = %{
         lead_id: lead.id,
+        organization_id: lead.organization_id,
         user_id: user && user.id,
         content: params["note"] || params["content"],
         note_type: params["noteType"] || params["note_type"] || "general",
@@ -355,7 +356,7 @@ defmodule EduConsultCrm.Crm do
 
     LeadNote
     |> where([n], n.lead_id == ^lead_id)
-    |> order_by([n], [desc: n.is_pinned, desc: n.inserted_at])
+    |> order_by([n], desc: n.is_pinned, desc: n.inserted_at)
     |> limit(^page_size)
     |> offset(^offset)
     |> preload([:user])
@@ -447,28 +448,39 @@ defmodule EduConsultCrm.Crm do
   Adds a tag to a lead.
   """
   def add_tag(%Lead{} = lead, %LeadTag{} = tag) do
-    Repo.insert_all(
-      "lead_tags",
-      [
-        %{
-          id: Ecto.UUID.generate(),
-          lead_id: lead.id,
-          tag_id: tag.id,
-          inserted_at: DateTime.utc_now() |> DateTime.truncate(:second),
-          updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
-        }
-      ],
-      on_conflict: :nothing
-    )
+    if lead.organization_id != tag.organization_id do
+      {:error, :forbidden}
+    else
+      Repo.insert_all(
+        "lead_tags",
+        [
+          %{
+            id: Ecto.UUID.generate(),
+            organization_id: lead.organization_id,
+            lead_id: lead.id,
+            tag_id: tag.id,
+            inserted_at: DateTime.utc_now() |> DateTime.truncate(:second),
+            updated_at: DateTime.utc_now() |> DateTime.truncate(:second)
+          }
+        ],
+        on_conflict: :nothing
+      )
 
-    {:ok, lead}
+      {:ok, lead}
+    end
   end
 
   @doc """
   Removes a tag from a lead.
   """
   def remove_tag(%Lead{} = lead, %LeadTag{} = tag) do
-    from(lt in "lead_tags", where: lt.lead_id == ^lead.id and lt.tag_id == ^tag.id)
+    from(
+      lt in "lead_tags",
+      where:
+        lt.organization_id == ^lead.organization_id and
+          lt.lead_id == ^lead.id and
+          lt.tag_id == ^tag.id
+    )
     |> Repo.delete_all()
 
     {:ok, lead}

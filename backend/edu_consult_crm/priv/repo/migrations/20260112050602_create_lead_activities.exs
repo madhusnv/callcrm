@@ -6,7 +6,9 @@ defmodule EduConsultCrm.Repo.Migrations.CreateLeadActivities do
       add :id, :binary_id, primary_key: true
       add :lead_id, references(:leads, type: :binary_id, on_delete: :delete_all), null: false
       add :user_id, references(:users, type: :binary_id, on_delete: :nilify_all)
-      add :organization_id, references(:organizations, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :organization_id, references(:organizations, type: :binary_id, on_delete: :delete_all),
+        null: false
 
       add :activity_type, :string, null: false
       add :description, :text

@@ -8,6 +8,7 @@ defmodule EduConsultCrm.Workers.RecordingCleanupWorker do
   import Ecto.Query
   alias EduConsultCrm.Repo
   alias EduConsultCrm.Calls.CallRecording
+  alias EduConsultCrm.Tenants
   require Logger
 
   @impl Oban.Worker
@@ -16,49 +17,57 @@ defmodule EduConsultCrm.Workers.RecordingCleanupWorker do
 
     now = DateTime.utc_now()
 
-    # Find expired recordings
-    expired_recordings =
-      CallRecording
-      |> where([r], r.expires_at < ^now)
-      |> where([r], r.is_deleted == false)
-      |> where([r], r.status == "uploaded")
-      |> Repo.all()
+    case Tenants.with_bypass_rls(fn ->
+           CallRecording
+           |> where([r], r.expires_at < ^now)
+           |> where([r], r.is_deleted == false)
+           |> where([r], r.status == "uploaded")
+           |> Repo.all()
+         end) do
+      {:ok, expired_recordings} ->
+        Logger.info("Found #{length(expired_recordings)} expired recordings")
 
-    Logger.info("Found #{length(expired_recordings)} expired recordings")
+        # Delete each from S3 and mark as deleted
+        results = Enum.map(expired_recordings, &cleanup_recording/1)
 
-    # Delete each from S3 and mark as deleted
-    results = Enum.map(expired_recordings, &cleanup_recording/1)
+        deleted_count = Enum.count(results, fn r -> r == :ok end)
+        failed_count = Enum.count(results, fn r -> r != :ok end)
 
-    deleted_count = Enum.count(results, fn r -> r == :ok end)
-    failed_count = Enum.count(results, fn r -> r != :ok end)
+        Logger.info("Cleanup complete: #{deleted_count} deleted, #{failed_count} failed")
 
-    Logger.info("Cleanup complete: #{deleted_count} deleted, #{failed_count} failed")
+        :ok
 
-    :ok
+      {:error, reason} ->
+        Logger.error("Failed to fetch expired recordings: #{inspect(reason)}")
+        {:error, reason}
+    end
   end
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"type" => "cleanup_failed"}}) do
     Logger.info("Starting failed recordings cleanup")
 
-    # Find recordings that failed upload multiple times
-    failed_recordings =
-      CallRecording
-      |> where([r], r.status == "failed")
-      |> where([r], r.retry_count >= 3)
-      |> where([r], r.is_deleted == false)
-      |> Repo.all()
+    case Tenants.with_bypass_rls(fn ->
+           CallRecording
+           |> where([r], r.status == "failed")
+           |> where([r], r.retry_count >= 3)
+           |> where([r], r.is_deleted == false)
+           |> Repo.all()
+         end) do
+      {:ok, failed_recordings} ->
+        # Just mark them as deleted (no S3 file to delete)
+        for recording <- failed_recordings do
+          mark_recording_deleted(recording)
+        end
 
-    # Just mark them as deleted (no S3 file to delete)
-    for recording <- failed_recordings do
-      recording
-      |> Ecto.Changeset.change(%{is_deleted: true})
-      |> Repo.update()
+        Logger.info("Marked #{length(failed_recordings)} failed recordings as deleted")
+
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to fetch failed recordings: #{inspect(reason)}")
+        {:error, reason}
     end
-
-    Logger.info("Marked #{length(failed_recordings)} failed recordings as deleted")
-
-    :ok
   end
 
   defp cleanup_recording(%CallRecording{} = recording) do
@@ -66,12 +75,15 @@ defmodule EduConsultCrm.Workers.RecordingCleanupWorker do
     case delete_from_s3(recording.storage_bucket, recording.storage_key) do
       :ok ->
         # Mark as deleted in database
-        recording
-        |> Ecto.Changeset.change(%{is_deleted: true})
-        |> Repo.update()
+        case mark_recording_deleted(recording) do
+          {:ok, _} ->
+            Logger.debug("Deleted recording #{recording.id}")
+            :ok
 
-        Logger.debug("Deleted recording #{recording.id}")
-        :ok
+          {:error, reason} ->
+            Logger.error("Failed to mark recording #{recording.id} deleted: #{inspect(reason)}")
+            {:error, reason}
+        end
 
       {:error, reason} ->
         Logger.error("Failed to delete recording #{recording.id}: #{inspect(reason)}")
@@ -92,6 +104,18 @@ defmodule EduConsultCrm.Workers.RecordingCleanupWorker do
   end
 
   defp delete_from_s3(_, _), do: :ok
+
+  defp mark_recording_deleted(recording) do
+    Tenants.with_bypass_rls(fn ->
+      recording
+      |> Ecto.Changeset.change(%{is_deleted: true})
+      |> Repo.update()
+    end)
+    |> case do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
+    end
+  end
 
   @doc """
   Schedules the cleanup job to run.

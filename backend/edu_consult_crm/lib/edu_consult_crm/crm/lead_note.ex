@@ -10,6 +10,7 @@ defmodule EduConsultCrm.Crm.LeadNote do
   schema "lead_notes" do
     belongs_to :lead, EduConsultCrm.Crm.Lead
     belongs_to :user, EduConsultCrm.Accounts.User
+    belongs_to :organization, EduConsultCrm.Tenants.Organization
 
     field :call_log_id, :binary_id
     field :content, :string
@@ -19,7 +20,7 @@ defmodule EduConsultCrm.Crm.LeadNote do
     timestamps(type: :utc_datetime)
   end
 
-  @required_fields ~w(content lead_id)a
+  @required_fields ~w(content lead_id organization_id)a
   @optional_fields ~w(user_id call_log_id note_type is_pinned)a
 
   def changeset(note, attrs) do
@@ -30,6 +31,7 @@ defmodule EduConsultCrm.Crm.LeadNote do
     |> validate_length(:content, min: 1, max: 10_000)
     |> foreign_key_constraint(:lead_id)
     |> foreign_key_constraint(:user_id)
+    |> foreign_key_constraint(:organization_id)
   end
 
   def note_types, do: @note_types

@@ -18,6 +18,9 @@ interface LeadRepository {
     fun getFollowUpsDue(): Flow<List<Lead>>
     suspend fun saveNote(leadId: String, note: LeadNote): Result<LeadNote>
     fun getNotes(leadId: String): Flow<List<LeadNote>>
+    fun getConflictedLeads(): Flow<List<Lead>>
+    suspend fun resolveConflictKeepLocal(leadId: String): Result<Unit>
+    suspend fun resolveConflictUseServer(leadId: String): Result<Unit>
     
     // Status and follow-up management
     suspend fun updateLeadStatus(leadId: String, status: String): Result<Unit>

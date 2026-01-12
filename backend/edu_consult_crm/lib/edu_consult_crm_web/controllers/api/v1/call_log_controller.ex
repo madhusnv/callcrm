@@ -2,7 +2,9 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
   use EduConsultCrmWeb, :controller
 
   alias EduConsultCrm.Calls
+  alias EduConsultCrm.Crm
   alias EduConsultCrm.Accounts.Guardian
+  alias EduConsultCrm.Tenants
 
   action_fallback EduConsultCrmWeb.FallbackController
 
@@ -30,8 +32,8 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
     org = conn.assigns.current_org
     user = Guardian.Plug.current_resource(conn)
 
-    case Calls.sync_call_logs(org.id, user.id, call_logs) do
-      {:ok, results} ->
+    case Tenants.with_org(org.id, fn -> Calls.sync_call_logs(org.id, user.id, call_logs) end) do
+      {:ok, {:ok, results}} ->
         conn
         |> put_status(:ok)
         |> json(%{
@@ -44,10 +46,15 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
           }
         })
 
-      {:error, reason} ->
+      {:ok, {:error, reason}} ->
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{status: false, message: "Sync failed: #{inspect(reason)}"})
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{status: false, message: "Sync failed"})
     end
   end
 
@@ -70,26 +77,39 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
   def sync_notes(conn, %{"call_log_id" => call_log_id, "notes" => notes}) do
     org = conn.assigns.current_org
 
-    case Calls.get_call_log(org.id, call_log_id) do
-      nil ->
+    result =
+      Tenants.with_org(org.id, fn ->
+        case Calls.get_call_log(org.id, call_log_id) do
+          nil ->
+            {:error, :not_found}
+
+          call_log ->
+            call_log
+            |> EduConsultCrm.Calls.CallLog.update_changeset(%{"notes" => notes})
+            |> EduConsultCrm.Repo.update()
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, updated}} ->
+        conn
+        |> put_status(:ok)
+        |> json(%{status: true, message: "Note saved", data: %{id: updated.id}})
+
+      {:ok, {:error, :not_found}} ->
         conn
         |> put_status(:not_found)
         |> json(%{status: false, message: "Call log not found"})
 
-      call_log ->
-        case call_log
-             |> EduConsultCrm.Calls.CallLog.update_changeset(%{"notes" => notes})
-             |> EduConsultCrm.Repo.update() do
-          {:ok, updated} ->
-            conn
-            |> put_status(:ok)
-            |> json(%{status: true, message: "Note saved", data: %{id: updated.id}})
+      {:ok, {:error, _}} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{status: false, message: "Failed to save note"})
 
-          {:error, _} ->
-            conn
-            |> put_status(:unprocessable_entity)
-            |> json(%{status: false, message: "Failed to save note"})
-        end
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{status: false, message: "Failed to save note"})
     end
   end
 
@@ -105,15 +125,41 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
   }
   """
   def get_by_lead(conn, %{"lead_id" => lead_id} = params) do
+    org = conn.assigns.current_org
     page = Map.get(params, "page", 1)
     page_size = Map.get(params, "page_size", 20)
 
-    calls = Calls.list_calls_for_lead(lead_id, %{page: page, page_size: page_size})
-    total = Calls.count_calls_for_lead(lead_id)
+    result =
+      Tenants.with_org(org.id, fn ->
+        case Crm.get_lead_for_org(org.id, lead_id) do
+          nil ->
+            {:error, :not_found}
 
-    conn
-    |> put_status(:ok)
-    |> render(:call_logs, call_logs: calls, total: total, page: page, page_size: page_size)
+          _lead ->
+            calls =
+              Calls.list_calls_for_lead(org.id, lead_id, %{page: page, page_size: page_size})
+
+            total = Calls.count_calls_for_lead(org.id, lead_id)
+            {:ok, {calls, total}}
+        end
+      end)
+
+    case result do
+      {:ok, {:ok, {calls, total}}} ->
+        conn
+        |> put_status(:ok)
+        |> render(:call_logs, call_logs: calls, total: total, page: page, page_size: page_size)
+
+      {:ok, {:error, :not_found}} ->
+        conn
+        |> put_status(:not_found)
+        |> json(%{status: false, message: "Lead not found"})
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{status: false, message: "Failed to fetch call logs"})
+    end
   end
 
   @doc """
@@ -138,8 +184,10 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
       "format" => params["format"] || "mp3"
     }
 
-    case Calls.create_recording_upload(org.id, call_log_id, user.id, file_info) do
-      {:ok, %{recording: recording, upload_url: upload_url, storage_key: storage_key}} ->
+    case Tenants.with_org(org.id, fn ->
+           Calls.create_recording_upload(org.id, call_log_id, user.id, file_info)
+         end) do
+      {:ok, {:ok, %{recording: recording, upload_url: upload_url, storage_key: storage_key}}} ->
         conn
         |> put_status(:ok)
         |> json(%{
@@ -153,10 +201,15 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
           }
         })
 
-      {:error, reason} ->
+      {:ok, {:error, reason}} ->
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{status: false, message: "Failed to generate upload URL: #{inspect(reason)}"})
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{status: false, message: "Failed to generate upload URL"})
     end
   end
 
@@ -183,8 +236,10 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
       "bitrate" => params["bitrate"]
     }
 
-    case Calls.confirm_recording_upload(org.id, recording_id, attrs) do
-      {:ok, recording} ->
+    case Tenants.with_org(org.id, fn ->
+           Calls.confirm_recording_upload(org.id, recording_id, attrs)
+         end) do
+      {:ok, {:ok, recording}} ->
         conn
         |> put_status(:ok)
         |> json(%{
@@ -193,9 +248,14 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
           data: %{id: recording.id, status: recording.status}
         })
 
-      {:error, _} ->
+      {:ok, {:error, _}} ->
         conn
         |> put_status(:unprocessable_entity)
+        |> json(%{status: false, message: "Failed to confirm upload"})
+
+      {:error, _} ->
+        conn
+        |> put_status(:internal_server_error)
         |> json(%{status: false, message: "Failed to confirm upload"})
     end
   end
@@ -207,16 +267,21 @@ defmodule EduConsultCrmWeb.Api.V1.CallLogController do
   def stream_recording(conn, %{"id" => recording_id}) do
     org = conn.assigns.current_org
 
-    case Calls.get_recording_stream_url(org.id, recording_id) do
-      {:ok, url} ->
+    case Tenants.with_org(org.id, fn -> Calls.get_recording_stream_url(org.id, recording_id) end) do
+      {:ok, {:ok, url}} ->
         conn
         |> put_status(:ok)
         |> json(%{status: true, data: %{stream_url: url, expires_in: 3600}})
 
-      {:error, :not_available} ->
+      {:ok, {:error, :not_available}} ->
         conn
         |> put_status(:not_found)
         |> json(%{status: false, message: "Recording not available"})
+
+      {:ok, {:error, _}} ->
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{status: false, message: "Failed to generate stream URL"})
 
       {:error, _} ->
         conn

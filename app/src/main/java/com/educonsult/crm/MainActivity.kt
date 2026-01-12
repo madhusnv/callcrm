@@ -23,6 +23,7 @@ import com.educonsult.crm.data.local.datastore.UserPreferences
 import com.educonsult.crm.ui.navigation.EduConsultNavGraph
 import com.educonsult.crm.ui.navigation.Screen
 import com.educonsult.crm.ui.theme.EduConsultCRMTheme
+import com.educonsult.crm.services.FcmService
 import com.educonsult.crm.workers.SyncScheduler
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
@@ -44,6 +45,8 @@ class MainActivity : ComponentActivity() {
 
     private var isReady by mutableStateOf(false)
     private var startDestination by mutableStateOf(Screen.Login.route)
+    private var pendingNavRoute by mutableStateOf<String?>(null)
+    private var isLoggedInState by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,6 +58,8 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        captureNavRoute(intent)
+
         enableEdgeToEdge()
 
         setContent {
@@ -65,6 +70,13 @@ class MainActivity : ComponentActivity() {
                 ) {
                     if (isReady) {
                         val navController = rememberNavController()
+                        androidx.compose.runtime.LaunchedEffect(isReady, isLoggedInState, pendingNavRoute) {
+                            val route = pendingNavRoute
+                            if (isLoggedInState && route != null && route != Screen.Dashboard.route) {
+                                navController.navigate(route)
+                                pendingNavRoute = null
+                            }
+                        }
                         EduConsultNavGraph(
                             navController = navController,
                             startDestination = startDestination
@@ -96,6 +108,7 @@ class MainActivity : ComponentActivity() {
 
     private suspend fun observeAuthState() {
         userPreferences.isLoggedIn.collect { isLoggedIn ->
+            isLoggedInState = isLoggedIn
             if (isLoggedIn) {
                 Timber.d("User logged in - starting sync scheduler")
                 syncScheduler.scheduleSyncWork(this@MainActivity)
@@ -106,5 +119,17 @@ class MainActivity : ComponentActivity() {
                 syncScheduler.cancelSyncWork(this@MainActivity)
             }
         }
+    }
+
+    private fun captureNavRoute(intent: android.content.Intent?) {
+        val route = intent?.getStringExtra(FcmService.EXTRA_NAV_ROUTE)
+        if (!route.isNullOrBlank()) {
+            pendingNavRoute = route
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent?) {
+        super.onNewIntent(intent)
+        captureNavRoute(intent)
     }
 }

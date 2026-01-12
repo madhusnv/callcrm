@@ -23,6 +23,12 @@ end
 config :edu_consult_crm, EduConsultCrmWeb.Endpoint,
   http: [port: String.to_integer(System.get_env("PORT", "4000"))]
 
+config :edu_consult_crm, :fcm, server_key: System.get_env("FCM_SERVER_KEY")
+
+config :edu_consult_crm, :admin_auth,
+  username: System.get_env("ADMIN_USER"),
+  password: System.get_env("ADMIN_PASSWORD")
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||

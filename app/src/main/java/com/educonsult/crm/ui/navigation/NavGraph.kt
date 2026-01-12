@@ -13,9 +13,13 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.educonsult.crm.ui.auth.AuthEvent
 import com.educonsult.crm.ui.auth.AuthViewModel
+import com.educonsult.crm.ui.dashboard.DashboardScreen
+import com.educonsult.crm.ui.conflicts.ConflictListScreen
 import com.educonsult.crm.ui.leads.detail.LeadDetailScreen
 import com.educonsult.crm.ui.leads.edit.LeadEditScreen
 import com.educonsult.crm.ui.leads.list.LeadListScreen
+import com.educonsult.crm.ui.courses.list.CourseListScreen
+import com.educonsult.crm.ui.courses.detail.CourseDetailScreen
 
 @Composable
 fun EduConsultNavGraph(
@@ -91,10 +95,14 @@ fun EduConsultNavGraph(
 
         // Main Navigation
         composable(Screen.Dashboard.route) {
-            // TODO: DashboardScreen(
-            //     onNavigateToLeads = { navController.navigate(Screen.LeadList.route) },
-            //     onNavigateToSettings = { navController.navigate(Screen.Settings.route) }
-            // )
+            DashboardScreen(
+                onNavigateToCourses = {
+                    navController.navigate(Screen.CourseList.route)
+                },
+                onNavigateToConflicts = {
+                    navController.navigate(Screen.Conflicts.route)
+                }
+            )
         }
 
         // Lead Navigation
@@ -151,6 +159,30 @@ fun EduConsultNavGraph(
             //     onLogout = { authViewModel.logout() },
             //     onNavigateBack = { navController.popBackStack() }
             // )
+        }
+
+        composable(Screen.CourseList.route) {
+            CourseListScreen(
+                onNavigateBack = { navController.popBackStack() },
+                onCourseClick = { courseId ->
+                    navController.navigate(Screen.CourseDetail.createRoute(courseId))
+                }
+            )
+        }
+
+        composable(Screen.Conflicts.route) {
+            ConflictListScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
+            route = Screen.CourseDetail.route,
+            arguments = listOf(navArgument("courseId") { type = NavType.StringType })
+        ) {
+            CourseDetailScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
 
         composable(Screen.Profile.route) {

@@ -8,6 +8,7 @@ import com.educonsult.crm.data.mapper.toDomain
 import com.educonsult.crm.data.mapper.toEntity
 import com.educonsult.crm.data.mapper.toSaveRequest
 import com.educonsult.crm.data.remote.api.LeadApi
+import com.educonsult.crm.data.remote.dto.lead.request.GetLeadByIdRequest
 import com.educonsult.crm.data.remote.dto.lead.request.GetLeadsRequest
 import com.educonsult.crm.data.remote.dto.lead.request.GetNotesRequest
 import com.educonsult.crm.domain.model.Lead
@@ -43,6 +44,7 @@ class LeadRepositoryImpl @Inject constructor(
         private const val SYNC_STATUS_CREATED = 1
         private const val SYNC_STATUS_UPDATED = 2
         private const val SYNC_STATUS_DELETED = 3
+        private const val SYNC_STATUS_CONFLICT = 4
     }
 
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
@@ -145,6 +147,9 @@ class LeadRepositoryImpl @Inject constructor(
                 val pendingLeads = leadDao.getPendingSync()
                 for (lead in pendingLeads) {
                     try {
+                        if (lead.syncStatus == SYNC_STATUS_CONFLICT) {
+                            continue
+                        }
                         when (lead.syncStatus) {
                             SYNC_STATUS_CREATED, SYNC_STATUS_UPDATED -> {
                                 val status = lead.statusId?.let { leadStatusDao.getById(it) }
@@ -198,8 +203,23 @@ class LeadRepositoryImpl @Inject constructor(
                     val response = leadApi.getLeads(GetLeadsRequest())
                     if (response.isSuccessful && response.body()?.status == true) {
                         val leads = response.body()?.data?.leads ?: emptyList()
-                        leadDao.insertAll(leads.map { it.toEntity() })
-                        syncedCount += leads.size
+                        leads.forEach { remoteLead ->
+                            val remoteEntity = remoteLead.toEntity()
+                            val local = leadDao.getById(remoteEntity.id)
+                            if (local != null && local.syncStatus != SYNC_STATUS_SYNCED) {
+                                if (local.updatedAt < remoteEntity.updatedAt) {
+                                    leadDao.updateSyncStatus(
+                                        local.id,
+                                        SYNC_STATUS_CONFLICT,
+                                        System.currentTimeMillis()
+                                    )
+                                    return@forEach
+                                }
+                                return@forEach
+                            }
+                            leadDao.insert(remoteEntity)
+                            syncedCount++
+                        }
                     }
                 } catch (e: Exception) {
                     // Failed to fetch from server
@@ -287,6 +307,47 @@ class LeadRepositoryImpl @Inject constructor(
         return leadNoteDao.getByLeadId(leadId).map { entities ->
             entities.map { it.toDomain() }
         }.flowOn(dispatcherProvider.io)
+    }
+
+    override fun getConflictedLeads(): Flow<List<Lead>> {
+        return leadDao.getBySyncStatus(SYNC_STATUS_CONFLICT).map { entities ->
+            val statusMap = getStatusMap()
+            entities.map { entity -> entity.toDomain(statusMap[entity.statusId]) }
+        }.flowOn(dispatcherProvider.io)
+    }
+
+    override suspend fun resolveConflictKeepLocal(leadId: String): Result<Unit> {
+        return withContext(dispatcherProvider.io) {
+            try {
+                val now = System.currentTimeMillis()
+                leadDao.updateSyncStatus(leadId, SYNC_STATUS_UPDATED, now)
+                Result.success(Unit)
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
+    }
+
+    override suspend fun resolveConflictUseServer(leadId: String): Result<Unit> {
+        return withContext(dispatcherProvider.io) {
+            try {
+                val response = leadApi.getById(GetLeadByIdRequest(leadId = leadId))
+                if (response.isSuccessful && response.body()?.status == true) {
+                    val lead = response.body()?.data?.lead
+                    if (lead != null) {
+                        leadDao.insert(lead.toEntity())
+                        Result.success(Unit)
+                    } else {
+                        leadDao.getById(leadId)?.let { leadDao.delete(it) }
+                        Result.success(Unit)
+                    }
+                } else {
+                    Result.failure(Exception(response.message()))
+                }
+            } catch (e: Exception) {
+                Result.failure(e)
+            }
+        }
     }
 
     override suspend fun updateLeadStatus(leadId: String, status: String): Result<Unit> {

@@ -40,12 +40,13 @@ defmodule EduConsultCrm.Templates.MessageTemplate do
   # Extracts dynamic fields like {{name}}, {{course}} from content
   defp extract_dynamic_fields(changeset) do
     content = get_field(changeset, :content)
-    
+
     if content do
-      fields = Regex.scan(~r/\{\{(\w+)\}\}/, content)
-               |> Enum.map(fn [_full, field] -> field end)
-               |> Enum.uniq()
-      
+      fields =
+        Regex.scan(~r/\{\{(\w+)\}\}/, content)
+        |> Enum.map(fn [_full, field] -> field end)
+        |> Enum.uniq()
+
       put_change(changeset, :dynamic_fields, fields)
     else
       changeset

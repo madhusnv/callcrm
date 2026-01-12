@@ -1,6 +1,7 @@
 package com.educonsult.crm.data.remote.api
 
 import com.educonsult.crm.data.remote.dto.lead.request.GetByNumberRequest
+import com.educonsult.crm.data.remote.dto.lead.request.GetLeadByIdRequest
 import com.educonsult.crm.data.remote.dto.lead.request.GetLeadsRequest
 import com.educonsult.crm.data.remote.dto.lead.request.GetNotesRequest
 import com.educonsult.crm.data.remote.dto.lead.request.SaveLeadRequest
@@ -31,6 +32,9 @@ interface LeadApi {
 
     @POST("lead/getByNumber")
     suspend fun getByNumber(@Body request: GetByNumberRequest): Response<BaseResponse<LeadResponse>>
+
+    @POST("lead/getById")
+    suspend fun getById(@Body request: GetLeadByIdRequest): Response<BaseResponse<LeadResponse>>
 
     @POST("lead/note")
     suspend fun getNotes(@Body request: GetNotesRequest): Response<BaseResponse<List<NoteDto>>>

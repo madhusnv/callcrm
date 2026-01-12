@@ -3,18 +3,30 @@ defmodule EduConsultCrmWeb.Api.V1.AuthController do
 
   alias EduConsultCrm.Accounts
   alias EduConsultCrm.Accounts.Guardian
+  alias EduConsultCrm.Tenants
 
   action_fallback EduConsultCrmWeb.FallbackController
 
   def login(conn, %{"username" => username, "password" => password}) do
     org = conn.assigns[:current_org]
 
-    case Accounts.authenticate_user(username, password, org.id) do
-      {:ok, user} ->
-        {:ok, access_token, _claims} = Guardian.encode_and_sign(user, %{}, ttl: {1, :day})
+    case Tenants.with_org(org.id, fn ->
+           Accounts.authenticate_user(username, password, org.id)
+         end) do
+      {:ok, {:ok, user}} ->
+        {:ok, access_token, _claims} =
+          Guardian.encode_and_sign(
+            user,
+            %{typ: "access", org_id: user.organization_id},
+            ttl: {1, :day}
+          )
 
         {:ok, refresh_token, _claims} =
-          Guardian.encode_and_sign(user, %{typ: "refresh"}, ttl: {30, :day})
+          Guardian.encode_and_sign(
+            user,
+            %{typ: "refresh", org_id: user.organization_id},
+            ttl: {30, :day}
+          )
 
         conn
         |> put_status(:ok)
@@ -27,24 +39,36 @@ defmodule EduConsultCrmWeb.Api.V1.AuthController do
           }
         })
 
-      {:error, :invalid_credentials} ->
+      {:ok, {:error, :invalid_credentials}} ->
         conn
         |> put_status(:unauthorized)
         |> json(%{status: false, message: "Invalid credentials"})
 
-      {:error, :account_disabled} ->
+      {:ok, {:error, :account_disabled}} ->
         conn
         |> put_status(:forbidden)
         |> json(%{status: false, message: "Account is disabled"})
+
+      {:error, _} ->
+        conn
+        |> put_status(:unauthorized)
+        |> json(%{status: false, message: "Invalid credentials"})
     end
   end
 
   def refresh(conn, %{"refresh_token" => refresh_token}) do
+    org = conn.assigns[:current_org]
+
     case Guardian.decode_and_verify(refresh_token, %{typ: "refresh"}) do
-      {:ok, claims} ->
-        case Guardian.resource_from_claims(claims) do
-          {:ok, user} ->
-            {:ok, new_access_token, _claims} = Guardian.encode_and_sign(user, %{}, ttl: {1, :day})
+      {:ok, %{"org_id" => org_id} = claims} when org_id == org.id ->
+        case Tenants.with_org(org.id, fn -> Guardian.resource_from_claims(claims) end) do
+          {:ok, {:ok, user}} ->
+            {:ok, new_access_token, _claims} =
+              Guardian.encode_and_sign(
+                user,
+                %{typ: "access", org_id: user.organization_id},
+                ttl: {1, :day}
+              )
 
             conn
             |> put_status(:ok)
@@ -53,13 +77,13 @@ defmodule EduConsultCrmWeb.Api.V1.AuthController do
               data: %{access_token: new_access_token}
             })
 
-          {:error, _} ->
+          _ ->
             conn
             |> put_status(:unauthorized)
             |> json(%{status: false, message: "Invalid refresh token"})
         end
 
-      {:error, _} ->
+      _ ->
         conn
         |> put_status(:unauthorized)
         |> json(%{status: false, message: "Invalid refresh token"})
@@ -69,12 +93,21 @@ defmodule EduConsultCrmWeb.Api.V1.AuthController do
   def register(conn, params) do
     org = conn.assigns[:current_org]
 
-    case Accounts.create_user(params, org.id) do
-      {:ok, user} ->
-        {:ok, access_token, _claims} = Guardian.encode_and_sign(user, %{}, ttl: {1, :day})
+    case Tenants.with_org(org.id, fn -> Accounts.create_user(params, org.id) end) do
+      {:ok, {:ok, user}} ->
+        {:ok, access_token, _claims} =
+          Guardian.encode_and_sign(
+            user,
+            %{typ: "access", org_id: user.organization_id},
+            ttl: {1, :day}
+          )
 
         {:ok, refresh_token, _claims} =
-          Guardian.encode_and_sign(user, %{typ: "refresh"}, ttl: {30, :day})
+          Guardian.encode_and_sign(
+            user,
+            %{typ: "refresh", org_id: user.organization_id},
+            ttl: {30, :day}
+          )
 
         conn
         |> put_status(:created)
@@ -87,15 +120,20 @@ defmodule EduConsultCrmWeb.Api.V1.AuthController do
           }
         })
 
-      {:error, :user_limit_reached} ->
+      {:ok, {:error, :user_limit_reached}} ->
         conn
         |> put_status(:payment_required)
         |> json(%{status: false, message: "User limit reached. Please upgrade your plan."})
 
-      {:error, changeset} ->
+      {:ok, {:error, changeset}} ->
         conn
         |> put_status(:unprocessable_entity)
         |> json(%{status: false, message: "Validation failed", errors: format_errors(changeset)})
+
+      {:error, _} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{status: false, message: "Validation failed"})
     end
   end
 
@@ -121,10 +159,11 @@ defmodule EduConsultCrmWeb.Api.V1.AuthController do
   end
 
   def logout(conn, _params) do
+    org = conn.assigns[:current_org]
     user = Guardian.Plug.current_resource(conn)
 
     if user do
-      Accounts.update_fcm_token(user.id, nil)
+      Tenants.with_org(org.id, fn -> Accounts.update_fcm_token(user.id, nil) end)
     end
 
     conn

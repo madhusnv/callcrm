@@ -1,7 +1,7 @@
 defmodule EduConsultCrmWeb.Plugs.RateLimitPlug do
   @moduledoc """
   Simple rate limiting plug using ETS for storage.
-  
+
   For production, consider using Redis-backed solutions like:
   - Hammer (https://github.com/ExHammer/hammer)
   - ExRated (https://github.com/grempe/ex_rated)
@@ -86,10 +86,11 @@ defmodule EduConsultCrmWeb.Plugs.RateLimitPlug do
   end
 
   defp send_rate_limited(conn) do
-    body = Jason.encode!(%{
-      status: false,
-      message: "Too many requests. Please try again later."
-    })
+    body =
+      Jason.encode!(%{
+        status: false,
+        message: "Too many requests. Please try again later."
+      })
 
     conn
     |> put_resp_content_type("application/json")

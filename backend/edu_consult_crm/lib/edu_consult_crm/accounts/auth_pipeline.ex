@@ -4,7 +4,7 @@ defmodule EduConsultCrm.Accounts.AuthPipeline do
     module: EduConsultCrm.Accounts.Guardian,
     error_handler: EduConsultCrm.Accounts.AuthErrorHandler
 
-  plug Guardian.Plug.VerifyHeader, scheme: "Bearer"
+  plug Guardian.Plug.VerifyHeader, scheme: "Bearer", claims: %{"typ" => "access"}
   plug Guardian.Plug.EnsureAuthenticated
   plug Guardian.Plug.LoadResource
 end

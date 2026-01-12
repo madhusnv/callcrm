@@ -1,7 +1,7 @@
 defmodule EduConsultCrmWeb.Plugs.EnsureUserOrgMatch do
   @moduledoc """
   Plug to ensure the authenticated user belongs to the tenant resolved from API key.
-  
+
   This prevents cross-tenant attacks where an attacker with a valid JWT for org A
   uses an API key for org B to access org B's data.
   """
@@ -17,7 +17,7 @@ defmodule EduConsultCrmWeb.Plugs.EnsureUserOrgMatch do
 
     cond do
       is_nil(user) or is_nil(org) ->
-        conn
+        send_forbidden(conn)
 
       user.organization_id == org.id ->
         conn
@@ -28,10 +28,11 @@ defmodule EduConsultCrmWeb.Plugs.EnsureUserOrgMatch do
   end
 
   defp send_forbidden(conn) do
-    body = Jason.encode!(%{
-      status: false,
-      message: "Access denied"
-    })
+    body =
+      Jason.encode!(%{
+        status: false,
+        message: "Access denied"
+      })
 
     conn
     |> put_resp_content_type("application/json")

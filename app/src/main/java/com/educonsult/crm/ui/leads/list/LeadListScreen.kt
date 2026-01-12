@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -57,6 +58,8 @@ import com.educonsult.crm.ui.components.ErrorMessage
 import com.educonsult.crm.ui.components.FilterBottomSheet
 import com.educonsult.crm.ui.components.LeadCard
 import com.educonsult.crm.ui.components.LoadingIndicator
+import com.educonsult.crm.ui.components.OfflineBanner
+import com.educonsult.crm.ui.common.NetworkStatusViewModel
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -69,6 +72,8 @@ fun LeadListScreen(
     viewModel: LeadListViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val networkViewModel: NetworkStatusViewModel = hiltViewModel()
+    val isConnected by networkViewModel.isConnected.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -197,42 +202,45 @@ fun LeadListScreen(
                 .padding(padding)
                 .nestedScroll(pullToRefreshState.nestedScrollConnection)
         ) {
-            when {
-                uiState.isLoading && uiState.leads.isEmpty() -> {
-                    LoadingIndicator()
-                }
-                uiState.error != null && uiState.leads.isEmpty() -> {
-                    ErrorMessage(
-                        message = uiState.error,
-                        onRetry = viewModel::refresh
-                    )
-                }
-                uiState.leads.isEmpty() -> {
-                    EmptyState(
-                        message = if (uiState.searchQuery.isNotBlank()) {
-                            "No leads found for \"${uiState.searchQuery}\""
-                        } else if (uiState.hasActiveFilters) {
-                            "No leads match the selected filters"
-                        } else {
-                            "No leads yet. Tap + to add your first lead."
-                        },
-                        actionLabel = if (uiState.hasActiveFilters) "Clear Filters" else null,
-                        onAction = if (uiState.hasActiveFilters) {
-                            { viewModel.updateFilter(com.educonsult.crm.domain.repository.LeadFilter()) }
-                        } else null
-                    )
-                }
-                else -> {
-                    LeadList(
-                        leads = uiState.leads,
-                        onLeadClick = onLeadClick,
-                        onCallClick = { phone ->
-                            val intent = Intent(Intent.ACTION_DIAL).apply {
-                                data = Uri.parse("tel:$phone")
+            Column(modifier = Modifier.fillMaxSize()) {
+                OfflineBanner(isOffline = !isConnected)
+                when {
+                    uiState.isLoading && uiState.leads.isEmpty() -> {
+                        LoadingIndicator()
+                    }
+                    uiState.error != null && uiState.leads.isEmpty() -> {
+                        ErrorMessage(
+                            message = uiState.error,
+                            onRetry = viewModel::refresh
+                        )
+                    }
+                    uiState.leads.isEmpty() -> {
+                        EmptyState(
+                            message = if (uiState.searchQuery.isNotBlank()) {
+                                "No leads found for \"${uiState.searchQuery}\""
+                            } else if (uiState.hasActiveFilters) {
+                                "No leads match the selected filters"
+                            } else {
+                                "No leads yet. Tap + to add your first lead."
+                            },
+                            actionLabel = if (uiState.hasActiveFilters) "Clear Filters" else null,
+                            onAction = if (uiState.hasActiveFilters) {
+                                { viewModel.updateFilter(com.educonsult.crm.domain.repository.LeadFilter()) }
+                            } else null
+                        )
+                    }
+                    else -> {
+                        LeadList(
+                            leads = uiState.leads,
+                            onLeadClick = onLeadClick,
+                            onCallClick = { phone ->
+                                val intent = Intent(Intent.ACTION_DIAL).apply {
+                                    data = Uri.parse("tel:$phone")
+                                }
+                                context.startActivity(intent)
                             }
-                            context.startActivity(intent)
-                        }
-                    )
+                        )
+                    }
                 }
             }
 
@@ -315,4 +323,3 @@ private fun LeadList(
         }
     }
 }
-

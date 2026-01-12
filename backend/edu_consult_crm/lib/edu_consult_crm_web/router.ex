@@ -32,11 +32,24 @@ defmodule EduConsultCrmWeb.Router do
     plug EduConsultCrmWeb.Plugs.RateLimitPlug, max_requests: 5, window_ms: 60_000
   end
 
+  pipeline :admin do
+    plug EduConsultCrmWeb.Plugs.AdminAuthPlug
+  end
+
   # Browser routes
   scope "/", EduConsultCrmWeb do
     pipe_through :browser
 
     get "/", PageController, :home
+  end
+
+  # LiveView admin
+  scope "/admin", EduConsultCrmWeb.Admin do
+    pipe_through [:browser, :admin]
+
+    live "/dashboard", DashboardLive
+    live "/leads", LeadLive.Index
+    live "/reports", ReportsLive
   end
 
   # Public API routes (require API key for tenant resolution)
@@ -56,8 +69,8 @@ defmodule EduConsultCrmWeb.Router do
 
     post "/auth/logout", AuthController, :logout
 
-    # Employee endpoints (to be added)
-    # post "/employee/updateFCM", EmployeeController, :update_fcm
+    # Employee endpoints
+    post "/employee/updateFCM", EmployeeController, :update_fcm
     # post "/employee/settings/save", EmployeeController, :save_settings
 
     # Lead endpoints
@@ -66,6 +79,7 @@ defmodule EduConsultCrmWeb.Router do
     post "/lead/saveNote", LeadController, :save_note
     post "/lead/status", LeadController, :list_statuses
     post "/lead/getByNumber", LeadController, :get_by_number
+    post "/lead/getById", LeadController, :get_by_id
     post "/lead/note", LeadController, :get_notes
     post "/lead/allTags", LeadController, :all_tags
     post "/lead/notContacted", LeadController, :not_contacted
@@ -87,6 +101,15 @@ defmodule EduConsultCrmWeb.Router do
     post "/callnote/template/fetchAll", TemplateController, :list_note_templates
     post "/messagetemplate/fetchAll", TemplateController, :list_message_templates
     post "/messagetemplate/render", TemplateController, :render_template
+
+    # Education endpoints
+    post "/education/countries", EducationController, :list_countries
+    post "/education/institutions", EducationController, :list_institutions
+    post "/education/courses", EducationController, :list_courses
+    post "/education/course/get", EducationController, :get_course
+
+    # Dashboard endpoints
+    post "/dashboard/stats", DashboardController, :stats
   end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development

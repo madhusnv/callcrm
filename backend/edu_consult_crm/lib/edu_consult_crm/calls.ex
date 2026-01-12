@@ -40,7 +40,7 @@ defmodule EduConsultCrm.Calls do
     CallLog
     |> where([c], c.organization_id == ^org_id)
     |> apply_call_filters(params)
-    |> order_by([c], [desc: c.call_at])
+    |> order_by([c], desc: c.call_at)
     |> limit(^page_size)
     |> offset(^offset)
     |> preload([:lead, :user, :recording])
@@ -50,14 +50,14 @@ defmodule EduConsultCrm.Calls do
   @doc """
   Lists call logs for a specific lead.
   """
-  def list_calls_for_lead(lead_id, params \\ %{}) do
+  def list_calls_for_lead(org_id, lead_id, params \\ %{}) do
     page = Map.get(params, :page, 1)
     page_size = Map.get(params, :page_size, 20)
     offset = (page - 1) * page_size
 
     CallLog
-    |> where([c], c.lead_id == ^lead_id)
-    |> order_by([c], [desc: c.call_at])
+    |> where([c], c.organization_id == ^org_id and c.lead_id == ^lead_id)
+    |> order_by([c], desc: c.call_at)
     |> limit(^page_size)
     |> offset(^offset)
     |> preload([:user, :recording])
@@ -67,9 +67,9 @@ defmodule EduConsultCrm.Calls do
   @doc """
   Counts call logs for a lead.
   """
-  def count_calls_for_lead(lead_id) do
+  def count_calls_for_lead(org_id, lead_id) do
     CallLog
-    |> where([c], c.lead_id == ^lead_id)
+    |> where([c], c.organization_id == ^org_id and c.lead_id == ^lead_id)
     |> Repo.aggregate(:count, :id)
   end
 
@@ -82,20 +82,21 @@ defmodule EduConsultCrm.Calls do
   Returns {:ok, %{created: count, updated: count, matched: count}}
   """
   def sync_call_logs(org_id, user_id, call_logs) when is_list(call_logs) do
-    results = Enum.reduce(call_logs, %{created: 0, updated: 0, matched: 0}, fn log_data, acc ->
-      case sync_single_call(org_id, user_id, log_data) do
-        {:created, lead_matched} ->
-          acc
-          |> Map.update!(:created, &(&1 + 1))
-          |> maybe_increment(:matched, lead_matched)
+    results =
+      Enum.reduce(call_logs, %{created: 0, updated: 0, matched: 0}, fn log_data, acc ->
+        case sync_single_call(org_id, user_id, log_data) do
+          {:created, lead_matched} ->
+            acc
+            |> Map.update!(:created, &(&1 + 1))
+            |> maybe_increment(:matched, lead_matched)
 
-        {:updated, _} ->
-          Map.update!(acc, :updated, &(&1 + 1))
+          {:updated, _} ->
+            Map.update!(acc, :updated, &(&1 + 1))
 
-        {:skipped, _} ->
-          acc
-      end
-    end)
+          {:skipped, _} ->
+            acc
+        end
+      end)
 
     {:ok, results}
   end
@@ -103,11 +104,12 @@ defmodule EduConsultCrm.Calls do
   defp sync_single_call(org_id, user_id, attrs) do
     device_call_id = attrs["device_call_id"] || attrs[:device_call_id]
 
-    existing = if device_call_id do
-      CallLog
-      |> where([c], c.user_id == ^user_id and c.device_call_id == ^device_call_id)
-      |> Repo.one()
-    end
+    existing =
+      if device_call_id do
+        CallLog
+        |> where([c], c.user_id == ^user_id and c.device_call_id == ^device_call_id)
+        |> Repo.one()
+      end
 
     if existing do
       # Update notes if provided
@@ -117,7 +119,8 @@ defmodule EduConsultCrm.Calls do
       end
     else
       # Create new call log
-      call_attrs = attrs
+      call_attrs =
+        attrs
         |> Map.put("organization_id", org_id)
         |> Map.put("user_id", user_id)
 
@@ -132,6 +135,7 @@ defmodule EduConsultCrm.Calls do
           if lead_id do
             update_lead_call_stats(lead_id, call_log)
           end
+
           {:created, matched}
 
         {:error, _} ->
@@ -151,13 +155,23 @@ defmodule EduConsultCrm.Calls do
     # Normalize phone number - remove spaces, dashes, country code prefix
     normalized = normalize_phone(phone)
 
-    lead = Lead
+    lead =
+      Lead
       |> where([l], l.organization_id == ^org_id)
       |> where([l], is_nil(l.deleted_at))
-      |> where([l], fragment("REPLACE(REPLACE(REPLACE(?, ' ', ''), '-', ''), '+91', '') = ?",
-                             l.phone, ^normalized) or
-                     fragment("REPLACE(REPLACE(REPLACE(?, ' ', ''), '-', ''), '+91', '') = ?",
-                             l.secondary_phone, ^normalized))
+      |> where(
+        [l],
+        fragment(
+          "REPLACE(REPLACE(REPLACE(?, ' ', ''), '-', ''), '+91', '') = ?",
+          l.phone,
+          ^normalized
+        ) or
+          fragment(
+            "REPLACE(REPLACE(REPLACE(?, ' ', ''), '-', ''), '+91', '') = ?",
+            l.secondary_phone,
+            ^normalized
+          )
+      )
       |> limit(1)
       |> Repo.one()
 
@@ -217,11 +231,12 @@ defmodule EduConsultCrm.Calls do
 
     with {:ok, recording} <- create_recording(attrs),
          {:ok, upload_url} <- generate_presigned_upload_url(storage_key) do
-      {:ok, %{
-        recording: recording,
-        upload_url: upload_url,
-        storage_key: storage_key
-      }}
+      {:ok,
+       %{
+         recording: recording,
+         upload_url: upload_url,
+         storage_key: storage_key
+       }}
     end
   end
 
@@ -331,21 +346,26 @@ defmodule EduConsultCrm.Calls do
   defp filter_by_user(query, %{user_id: user_id}) when not is_nil(user_id) do
     where(query, [c], c.user_id == ^user_id)
   end
+
   defp filter_by_user(query, _), do: query
 
   defp filter_by_lead(query, %{lead_id: lead_id}) when not is_nil(lead_id) do
     where(query, [c], c.lead_id == ^lead_id)
   end
+
   defp filter_by_lead(query, _), do: query
 
-  defp filter_by_type(query, %{call_type: call_type}) when call_type in ~w(incoming outgoing missed) do
+  defp filter_by_type(query, %{call_type: call_type})
+       when call_type in ~w(incoming outgoing missed) do
     where(query, [c], c.call_type == ^call_type)
   end
+
   defp filter_by_type(query, _), do: query
 
   defp filter_by_date_range(query, %{start_date: start_date, end_date: end_date})
        when not is_nil(start_date) and not is_nil(end_date) do
     where(query, [c], c.call_at >= ^start_date and c.call_at <= ^end_date)
   end
+
   defp filter_by_date_range(query, _), do: query
 end
