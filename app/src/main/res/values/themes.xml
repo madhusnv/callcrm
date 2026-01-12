@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.EduConsultCRM" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- Popup theme for floating note window after calls -->
+    <style name="Theme.EduConsultCRM.Popup" parent="android:Theme.Material.Light.Dialog">
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+</resources>
